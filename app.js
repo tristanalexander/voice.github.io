@@ -8,6 +8,8 @@ class WhisperTranscriber {
         this.transcriber = null;
         this.transcriptionBuffer = '';
         this.lastTranscription = null; // For duplicate detection
+        this.recentTranscriptions = []; // Track recent transcriptions for better duplicate detection
+        this.repetitionCount = 0; // Track repetitive patterns
         
         // Audio processing constants
         this.kSampleRate = 16000;
@@ -253,8 +255,8 @@ class WhisperTranscriber {
             // Convert accumulated buffer to Float32Array
             const audioData = new Float32Array(this.audioBuffer);
             
-            // Ensure we have enough audio data (at least 1 second)
-            if (audioData.length < this.kSampleRate) {
+            // Ensure we have enough audio data (at least 2 seconds for better quality)
+            if (audioData.length < this.kSampleRate * 2) {
                 this.logDebug('Not enough audio data, skipping...');
                 return;
             }
@@ -273,17 +275,20 @@ class WhisperTranscriber {
             
             if (result.text && result.text.trim().length > 0) {
                 const text = result.text.trim();
-                if (!this.isAudioArtifact(text) && !this.isDuplicateText(text)) {
+                if (!this.isAudioArtifact(text) && !this.isDuplicateOrRepetitive(text)) {
                     this.appendTranscription(text);
                     this.logDebug(`Transcribed: "${text}"`);
                     
-                    // Store last transcription for duplicate detection
-                    this.lastTranscription = text;
+                    // Store transcription history for better duplicate detection
+                    this.addToTranscriptionHistory(text);
+                    this.repetitionCount = 0; // Reset repetition count on successful new transcription
+                } else {
+                    this.logDebug(`Filtered out: "${text}" (duplicate/repetitive/artifact)`);
                 }
             }
             
-            // Keep only small overlap to prevent repetitions (reduced from 2 seconds to 0.5 seconds)
-            const keepSamples = this.kSampleRate * 0.5; // Keep 0.5 seconds for minimal context
+            // Clear most of the buffer, keeping only minimal overlap (0.2 seconds)
+            const keepSamples = this.kSampleRate * 0.2;
             if (this.audioBuffer.length > keepSamples) {
                 this.audioBuffer = this.audioBuffer.slice(-keepSamples);
             }
@@ -309,20 +314,89 @@ class WhisperTranscriber {
         }
     }
     
-    // Check for duplicate transcriptions to reduce repetition
-    isDuplicateText(newText) {
-        if (!this.lastTranscription) return false;
+    // Enhanced duplicate and repetition detection
+    isDuplicateOrRepetitive(newText) {
+        // Check against recent transcriptions
+        if (this.isRecentDuplicate(newText)) {
+            return true;
+        }
         
-        // Calculate similarity between new text and last transcription
-        const similarity = this.calculateTextSimilarity(newText, this.lastTranscription);
-        
-        // If more than 60% similar, consider it a duplicate
-        if (similarity > 0.6) {
-            this.logDebug(`Detected duplicate text (${(similarity * 100).toFixed(1)}% similar), skipping...`);
+        // Check for repetitive patterns (like "three, four, three, four...")
+        if (this.isRepetitivePattern(newText)) {
+            this.repetitionCount++;
+            if (this.repetitionCount > 2) {
+                this.logDebug('Detected excessive repetition, clearing audio buffer...');
+                this.audioBuffer = []; // Clear buffer to break the loop
+                this.repetitionCount = 0;
+            }
             return true;
         }
         
         return false;
+    }
+    
+    // Check if text is similar to recent transcriptions
+    isRecentDuplicate(newText) {
+        for (const recentText of this.recentTranscriptions) {
+            const similarity = this.calculateTextSimilarity(newText, recentText);
+            if (similarity > 0.7) { // Increased threshold for stricter duplicate detection
+                this.logDebug(`Detected duplicate text (${(similarity * 100).toFixed(1)}% similar to recent)`);
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    // Detect repetitive patterns in the text
+    isRepetitivePattern(text) {
+        const words = text.toLowerCase().split(/\s+/);
+        
+        // Check for immediate word repetition (like "four four four")
+        let consecutiveRepeats = 0;
+        for (let i = 1; i < words.length; i++) {
+            if (words[i] === words[i-1]) {
+                consecutiveRepeats++;
+                if (consecutiveRepeats > 2) {
+                    this.logDebug('Detected consecutive word repetition');
+                    return true;
+                }
+            } else {
+                consecutiveRepeats = 0;
+            }
+        }
+        
+        // Check for alternating pattern (like "three four three four")
+        if (words.length >= 4) {
+            const pattern1 = words.slice(0, 2);
+            const pattern2 = words.slice(2, 4);
+            if (pattern1[0] === pattern2[0] && pattern1[1] === pattern2[1]) {
+                this.logDebug('Detected alternating pattern repetition');
+                return true;
+            }
+        }
+        
+        // Check if more than 60% of the text consists of repeated short phrases
+        const uniqueWords = new Set(words);
+        const repetitionRatio = 1 - (uniqueWords.size / words.length);
+        if (repetitionRatio > 0.6 && words.length > 6) {
+            this.logDebug(`High repetition ratio detected: ${(repetitionRatio * 100).toFixed(1)}%`);
+            return true;
+        }
+        
+        return false;
+    }
+    
+    // Add transcription to history for duplicate detection
+    addToTranscriptionHistory(text) {
+        this.recentTranscriptions.push(text);
+        
+        // Keep only the last 5 transcriptions for comparison
+        if (this.recentTranscriptions.length > 5) {
+            this.recentTranscriptions.shift();
+        }
+        
+        // Also update the single last transcription for backward compatibility
+        this.lastTranscription = text;
     }
     
     // Simple text similarity calculation
@@ -393,13 +467,24 @@ class WhisperTranscriber {
             'Thank you.',
             'Thanks for watching.',
             'Bye.',
-            'Goodbye.'
+            'Goodbye.',
+            'you',  // Common single-word artifacts
+            'the',
+            'and',
+            'a',
+            'to'
         ];
         
         const lowerText = text.toLowerCase().trim();
         
-        // Filter very short utterances
-        if (lowerText.length < 3) return true;
+        // Filter very short utterances (less than 4 characters)
+        if (lowerText.length < 4) return true;
+        
+        // Filter single common words
+        const words = lowerText.split(/\s+/);
+        if (words.length === 1 && artifacts.includes(words[0])) {
+            return true;
+        }
         
         // Filter common artifacts
         return artifacts.some(artifact => 
@@ -431,9 +516,11 @@ class WhisperTranscriber {
                 this.stream = null;
             }
             
-            // Clear audio buffer
+            // Clear audio buffer and transcription history
             this.audioBuffer = [];
-            this.lastTranscription = null; // Reset duplicate detection
+            this.lastTranscription = null;
+            this.recentTranscriptions = [];
+            this.repetitionCount = 0;
             
             this.resetUI();
             this.updateStatus('Recording stopped');
@@ -470,6 +557,9 @@ class WhisperTranscriber {
     clearTranscription() {
         this.transcriptionBuffer = '';
         this.output.textContent = 'Transcribed text will appear here...';
+        this.recentTranscriptions = [];
+        this.lastTranscription = null;
+        this.repetitionCount = 0;
         this.logDebug('Transcription cleared');
     }
     
