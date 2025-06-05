@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Whisper Transcription</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎤 Real-time Transcription</h1>
+            <p>Local speech-to-text using Whisper via Transformers.js</p>
+        </header>
+
+        <div class="controls">
+            <div class="microphone-selection">
+                <label for="microphone-select">Microphone:</label>
+                <select id="microphone-select">
+                    <option value="">Select microphone...</option>
+                </select>
+            </div>
+
+            <div class="model-selection">
+                <label for="model-select">Whisper Model:</label>
+                <select id="model-select">
+                    <option value="tiny">Whisper Tiny (38 MB)</option>
+                    <option value="base">Whisper Base (74 MB)</option>
+                </select>
+            </div>
+
+            <div class="recording-controls">
+                <button id="start-btn" class="btn btn-start" disabled>Start Recording</button>
+                <button id="stop-btn" class="btn btn-stop" disabled>Stop Recording</button>
+                <button id="clear-btn" class="btn btn-clear">Clear</button>
+            </div>
+
+            <div class="status">
+                <span id="status">Status: <strong>Not initialized</strong></span>
+            </div>
+        </div>
+
+        <div class="transcription-area">
+            <h3>Transcription:</h3>
+            <div id="transcription-output" class="output">
+                Transcribed text will appear here...
+            </div>
+        </div>
+
+        <div class="info-section">
+            <h3>🚀 Local Whisper Transcription - 100% Offline</h3>
+            <div class="info-content">
+                <p>This app uses <strong>Transformers.js with Whisper</strong> for high-quality, completely local speech recognition.</p>
+                <ul>
+                    <li>✅ <strong>100% Local Processing:</strong> All computation happens on your device</li>
+                    <li>✅ <strong>Complete Privacy:</strong> No data ever sent to internet or servers</li>
+                    <li>✅ <strong>Works Offline:</strong> No internet connection required after initial load</li>
+                    <li>✅ <strong>High Accuracy:</strong> Uses OpenAI's Whisper model locally</li>
+                    <li>✅ <strong>Real-time Processing:</strong> Live transcription as you speak</li>
+                    <li>✅ <strong>Easy Deployment:</strong> Works in any modern browser without special setup</li>
+                </ul>
+                <p><strong>Current mode:</strong> <span id="current-mode">Detecting...</span></p>
+                <p><strong>Note:</strong> This application processes all audio locally on your device. No data is transmitted over the internet.</p>
+                <p><strong>System Requirements:</strong> Modern browser with WebAssembly support. Works on desktop and mobile.</p>
+            </div>
+        </div>
+
+        <div class="debug-section" style="display: none;">
+            <h3>Debug Output:</h3>
+            <div id="debug-output" class="debug"></div>
+        </div>
+    </div>
+
+    <!-- Load Transformers.js from CDN -->
+    <script type="module">
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+        
+        // Configure Transformers.js to download models from HuggingFace Hub
+        env.allowRemoteModels = true;
+        env.allowLocalModels = true;
+        
+        // Make available globally
+        window.transformers = { pipeline, env };
+        
+        console.log('Transformers.js loaded successfully');
+        
+        // Load the main application script
+        const script = document.createElement('script');
+        script.src = 'app.js';
+        document.head.appendChild(script);
+    </script>
+</body>
+</html> 
