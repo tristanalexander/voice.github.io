@@ -37,7 +37,6 @@ class WhisperTranscriber {
         } catch (error) {
             this.updateStatus('Initialization failed');
             this.logDebug('Initialization error: ' + error.message);
-            console.error('Initialization error:', error);
         }
     }
     
@@ -155,12 +154,12 @@ class WhisperTranscriber {
     async startRecording() {
         try {
             if (!this.micSelect.value) {
-                alert('Please select a microphone first');
+                this.showError('Please select a microphone first');
                 return;
             }
             
             if (!this.transcriber) {
-                alert('Whisper model not loaded. Please wait for initialization to complete.');
+                this.showError('Whisper model not loaded. Please wait for initialization to complete.');
                 return;
             }
             
@@ -184,7 +183,6 @@ class WhisperTranscriber {
         } catch (error) {
             this.updateStatus('Failed to start recording');
             this.logDebug('Recording error: ' + error.message);
-            console.error('Recording error:', error);
             this.resetUI();
         }
     }
@@ -443,7 +441,6 @@ class WhisperTranscriber {
             
         } catch (error) {
             this.logDebug('Stop recording error: ' + error.message);
-            console.error('Stop recording error:', error);
         }
     }
     
@@ -487,6 +484,35 @@ class WhisperTranscriber {
         }
     }
     
+    showError(message) {
+        // Create a temporary error message element
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error-message';
+        errorDiv.textContent = message;
+        errorDiv.style.cssText = `
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ef4444;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            font-weight: 500;
+        `;
+        
+        document.body.appendChild(errorDiv);
+        
+        // Remove after 4 seconds
+        setTimeout(() => {
+            if (errorDiv.parentNode) {
+                errorDiv.parentNode.removeChild(errorDiv);
+            }
+        }, 4000);
+    }
+    
     logDebug(message) {
         const timestamp = new Date().toLocaleTimeString();
         this.debugOutput.textContent += `[${timestamp}] ${message}\n`;
@@ -497,10 +523,12 @@ class WhisperTranscriber {
             document.querySelector('.debug-section').style.display = 'block';
         }
         
-        console.log(`[WhisperTranscriber] ${message}`);
+        // Only log to console in development
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            console.log(`[WhisperTranscriber] ${message}`);
+        }
     }
 }
 
 // Initialize the application
-console.log('Starting WhisperTranscriber with Transformers.js...');
 new WhisperTranscriber(); 

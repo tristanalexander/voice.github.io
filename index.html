@@ -83,7 +83,10 @@
         // Make available globally
         window.transformers = { pipeline, env };
         
-        console.log('Transformers.js loaded successfully');
+        // Only log in development
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            console.log('Transformers.js loaded successfully');
+        }
         
         // Load the main application script
         const script = document.createElement('script');

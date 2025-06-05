@@ -310,4 +310,20 @@ select:focus {
 
 .btn-stop.recording {
     animation: pulse 2s infinite;
+}
+
+/* Error message notifications */
+.error-message {
+    animation: slideInFromTop 0.3s ease-out;
+}
+
+@keyframes slideInFromTop {
+    from {
+        transform: translate(-50%, -100%);
+        opacity: 0;
+    }
+    to {
+        transform: translate(-50%, 0);
+        opacity: 1;
+    }
 } 
