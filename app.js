@@ -275,16 +275,25 @@ class WhisperTranscriber {
             
             if (result.text && result.text.trim().length > 0) {
                 const text = result.text.trim();
-                if (!this.isAudioArtifact(text) && !this.isDuplicateOrRepetitive(text)) {
+                this.logDebug(`Raw transcription result: "${text}"`);
+                
+                const isArtifact = this.isAudioArtifact(text);
+                const isDuplicateOrRep = this.isDuplicateOrRepetitive(text);
+                
+                this.logDebug(`Artifact check: ${isArtifact}, Duplicate/Repetitive check: ${isDuplicateOrRep}`);
+                
+                if (!isArtifact && !isDuplicateOrRep) {
                     this.appendTranscription(text);
-                    this.logDebug(`Transcribed: "${text}"`);
+                    this.logDebug(`✅ Transcribed: "${text}"`);
                     
                     // Store transcription history for better duplicate detection
                     this.addToTranscriptionHistory(text);
                     this.repetitionCount = 0; // Reset repetition count on successful new transcription
                 } else {
-                    this.logDebug(`Filtered out: "${text}" (duplicate/repetitive/artifact)`);
+                    this.logDebug(`❌ Filtered out: "${text}" (artifact: ${isArtifact}, duplicate/repetitive: ${isDuplicateOrRep})`);
                 }
+            } else {
+                this.logDebug('No transcription result or empty text');
             }
             
             // Clear most of the buffer, keeping only minimal overlap (0.2 seconds)
@@ -316,6 +325,11 @@ class WhisperTranscriber {
     
     // Enhanced duplicate and repetition detection
     isDuplicateOrRepetitive(newText) {
+        // Skip all filtering for the first few transcriptions to ensure they get through
+        if (this.recentTranscriptions.length < 2) {
+            return false;
+        }
+        
         // Only check for repetitive patterns if we have a history of repetitions
         if (this.repetitionCount > 0 && this.isRepetitivePattern(newText)) {
             this.repetitionCount++;
@@ -327,8 +341,8 @@ class WhisperTranscriber {
             return true;
         }
         
-        // Check against recent transcriptions (but be more lenient for first few transcriptions)
-        if (this.recentTranscriptions.length > 2 && this.isRecentDuplicate(newText)) {
+        // Check against recent transcriptions (but be more lenient)
+        if (this.recentTranscriptions.length > 3 && this.isRecentDuplicate(newText)) {
             return true;
         }
         
@@ -337,14 +351,26 @@ class WhisperTranscriber {
     
     // Check if text is similar to recent transcriptions
     isRecentDuplicate(newText) {
-        for (const recentText of this.recentTranscriptions) {
-            const similarity = this.calculateTextSimilarity(newText, recentText);
-            // Only filter if very similar (80%+) to prevent false positives
-            if (similarity > 0.8) {
-                this.logDebug(`Detected duplicate text (${(similarity * 100).toFixed(1)}% similar to recent)`);
+        // Only check against the most recent transcription for exact duplicates
+        if (this.recentTranscriptions.length > 0) {
+            const mostRecent = this.recentTranscriptions[this.recentTranscriptions.length - 1];
+            const similarity = this.calculateTextSimilarity(newText, mostRecent);
+            
+            // Only filter if extremely similar (90%+) to prevent blocking new speech
+            if (similarity > 0.9) {
+                this.logDebug(`Detected near-duplicate text (${(similarity * 100).toFixed(1)}% similar to most recent)`);
                 return true;
             }
         }
+        
+        // Check for exact matches in recent history
+        for (const recentText of this.recentTranscriptions.slice(-3)) { // Only check last 3
+            if (newText.toLowerCase().trim() === recentText.toLowerCase().trim()) {
+                this.logDebug('Detected exact duplicate text');
+                return true;
+            }
+        }
+        
         return false;
     }
     
