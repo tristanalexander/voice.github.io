@@ -316,19 +316,19 @@ class WhisperTranscriber {
     
     // Enhanced duplicate and repetition detection
     isDuplicateOrRepetitive(newText) {
-        // Check against recent transcriptions
-        if (this.isRecentDuplicate(newText)) {
-            return true;
-        }
-        
-        // Check for repetitive patterns (like "three, four, three, four...")
-        if (this.isRepetitivePattern(newText)) {
+        // Only check for repetitive patterns if we have a history of repetitions
+        if (this.repetitionCount > 0 && this.isRepetitivePattern(newText)) {
             this.repetitionCount++;
             if (this.repetitionCount > 2) {
                 this.logDebug('Detected excessive repetition, clearing audio buffer...');
                 this.audioBuffer = []; // Clear buffer to break the loop
                 this.repetitionCount = 0;
             }
+            return true;
+        }
+        
+        // Check against recent transcriptions (but be more lenient for first few transcriptions)
+        if (this.recentTranscriptions.length > 2 && this.isRecentDuplicate(newText)) {
             return true;
         }
         
@@ -339,7 +339,8 @@ class WhisperTranscriber {
     isRecentDuplicate(newText) {
         for (const recentText of this.recentTranscriptions) {
             const similarity = this.calculateTextSimilarity(newText, recentText);
-            if (similarity > 0.7) { // Increased threshold for stricter duplicate detection
+            // Only filter if very similar (80%+) to prevent false positives
+            if (similarity > 0.8) {
                 this.logDebug(`Detected duplicate text (${(similarity * 100).toFixed(1)}% similar to recent)`);
                 return true;
             }
@@ -351,12 +352,17 @@ class WhisperTranscriber {
     isRepetitivePattern(text) {
         const words = text.toLowerCase().split(/\s+/);
         
+        // Only check for patterns if we already have some repetition history
+        if (this.repetitionCount === 0) {
+            return false;
+        }
+        
         // Check for immediate word repetition (like "four four four")
         let consecutiveRepeats = 0;
         for (let i = 1; i < words.length; i++) {
             if (words[i] === words[i-1]) {
                 consecutiveRepeats++;
-                if (consecutiveRepeats > 2) {
+                if (consecutiveRepeats > 3) { // Increased threshold
                     this.logDebug('Detected consecutive word repetition');
                     return true;
                 }
@@ -365,20 +371,22 @@ class WhisperTranscriber {
             }
         }
         
-        // Check for alternating pattern (like "three four three four")
-        if (words.length >= 4) {
+        // Check for alternating pattern (like "three four three four") - but only if very obvious
+        if (words.length >= 6) { // Increased minimum length
             const pattern1 = words.slice(0, 2);
             const pattern2 = words.slice(2, 4);
-            if (pattern1[0] === pattern2[0] && pattern1[1] === pattern2[1]) {
+            const pattern3 = words.slice(4, 6);
+            if (pattern1[0] === pattern2[0] && pattern1[1] === pattern2[1] && 
+                pattern2[0] === pattern3[0] && pattern2[1] === pattern3[1]) {
                 this.logDebug('Detected alternating pattern repetition');
                 return true;
             }
         }
         
-        // Check if more than 60% of the text consists of repeated short phrases
+        // Check if more than 70% of the text consists of repeated short phrases (increased threshold)
         const uniqueWords = new Set(words);
         const repetitionRatio = 1 - (uniqueWords.size / words.length);
-        if (repetitionRatio > 0.6 && words.length > 6) {
+        if (repetitionRatio > 0.7 && words.length > 8) { // Increased thresholds
             this.logDebug(`High repetition ratio detected: ${(repetitionRatio * 100).toFixed(1)}%`);
             return true;
         }
@@ -467,22 +475,17 @@ class WhisperTranscriber {
             'Thank you.',
             'Thanks for watching.',
             'Bye.',
-            'Goodbye.',
-            'you',  // Common single-word artifacts
-            'the',
-            'and',
-            'a',
-            'to'
+            'Goodbye.'
         ];
         
         const lowerText = text.toLowerCase().trim();
         
-        // Filter very short utterances (less than 4 characters)
-        if (lowerText.length < 4) return true;
+        // Filter very short utterances (less than 3 characters) - reduced from 4
+        if (lowerText.length < 3) return true;
         
-        // Filter single common words
+        // Only filter single-word artifacts if they're very common and short
         const words = lowerText.split(/\s+/);
-        if (words.length === 1 && artifacts.includes(words[0])) {
+        if (words.length === 1 && words[0].length <= 3 && ['you', 'the', 'and', 'a', 'to', 'i', 'it'].includes(words[0])) {
             return true;
         }
         
