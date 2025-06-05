@@ -196,7 +196,7 @@ class WhisperTranscriber {
                     deviceId: this.micSelect.value,
                     sampleRate: this.kSampleRate,
                     channelCount: 1,
-                    echoCancellation: false,
+                    echoCancellation: true,  // Changed to true for better audio quality
                     autoGainControl: true,
                     noiseSuppression: true,
                 }
@@ -217,12 +217,23 @@ class WhisperTranscriber {
             
             this.audioBuffer = [];
             this.lastProcessTime = Date.now();
+            this.audioLevelSum = 0;
+            this.audioSampleCount = 0;
             
             this.scriptProcessor.onaudioprocess = (event) => {
                 if (!this.isRecording) return;
                 
                 const inputBuffer = event.inputBuffer;
                 const inputData = inputBuffer.getChannelData(0);
+                
+                // Calculate audio level for monitoring
+                let sum = 0;
+                for (let i = 0; i < inputData.length; i++) {
+                    sum += Math.abs(inputData[i]);
+                }
+                const avgLevel = sum / inputData.length;
+                this.audioLevelSum += avgLevel;
+                this.audioSampleCount++;
                 
                 // Accumulate audio data
                 this.audioBuffer.push(...inputData);
@@ -250,19 +261,35 @@ class WhisperTranscriber {
         if (this.audioBuffer.length === 0) return;
         
         try {
-            this.logDebug('Processing accumulated audio...');
+            // Calculate average audio level
+            const avgAudioLevel = this.audioSampleCount > 0 ? this.audioLevelSum / this.audioSampleCount : 0;
+            this.logDebug(`Processing accumulated audio... (${this.audioBuffer.length} samples, avg level: ${avgAudioLevel.toFixed(4)})`);
+            
+            // Reset audio level tracking
+            this.audioLevelSum = 0;
+            this.audioSampleCount = 0;
             
             // Convert accumulated buffer to Float32Array
             const audioData = new Float32Array(this.audioBuffer);
             
+            // Check if we have sufficient audio energy
+            if (avgAudioLevel < 0.001) {
+                this.logDebug('Audio level too low, likely no speech detected');
+                // Clear buffer but don't process
+                this.audioBuffer = [];
+                return;
+            }
+            
             // Ensure we have enough audio data (at least 2 seconds for better quality)
             if (audioData.length < this.kSampleRate * 2) {
-                this.logDebug('Not enough audio data, skipping...');
+                this.logDebug(`Not enough audio data (${audioData.length} samples, need ${this.kSampleRate * 2}), skipping...`);
                 return;
             }
             
             // Reset error count on successful processing start
             this.errorCount = 0;
+            
+            this.logDebug('Sending audio to Whisper model...');
             
             // Run transcription
             const result = await this.transcriber(audioData, {
@@ -272,6 +299,8 @@ class WhisperTranscriber {
                 language: 'english',
                 task: 'transcribe'
             });
+            
+            this.logDebug(`Whisper model response: ${JSON.stringify(result)}`);
             
             if (result.text && result.text.trim().length > 0) {
                 const text = result.text.trim();
@@ -293,7 +322,7 @@ class WhisperTranscriber {
                     this.logDebug(`❌ Filtered out: "${text}" (artifact: ${isArtifact}, duplicate/repetitive: ${isDuplicateOrRep})`);
                 }
             } else {
-                this.logDebug('No transcription result or empty text');
+                this.logDebug('No transcription result or empty text from Whisper model');
             }
             
             // Clear most of the buffer, keeping only minimal overlap (0.2 seconds)
@@ -378,6 +407,12 @@ class WhisperTranscriber {
     isRepetitivePattern(text) {
         const words = text.toLowerCase().split(/\s+/);
         
+        // Check for extreme repetition (like the tiny.en model issue)
+        if (this.hasExtremeRepetition(text)) {
+            this.logDebug('Detected extreme repetition pattern');
+            return true;
+        }
+        
         // Only check for patterns if we already have some repetition history
         if (this.repetitionCount === 0) {
             return false;
@@ -415,6 +450,52 @@ class WhisperTranscriber {
         if (repetitionRatio > 0.7 && words.length > 8) { // Increased thresholds
             this.logDebug(`High repetition ratio detected: ${(repetitionRatio * 100).toFixed(1)}%`);
             return true;
+        }
+        
+        return false;
+    }
+    
+    // Detect extreme repetition patterns (like the tiny.en model issue)
+    hasExtremeRepetition(text) {
+        // Check for repeated numbers (like "12/12/12/12...")
+        if (/(\d+[\/\-\s]*){10,}/.test(text)) {
+            return true;
+        }
+        
+        // Check for repeated single words more than 10 times
+        const words = text.toLowerCase().split(/\s+/);
+        const wordCounts = {};
+        for (const word of words) {
+            if (word.length > 0) {
+                wordCounts[word] = (wordCounts[word] || 0) + 1;
+                if (wordCounts[word] > 10) {
+                    return true;
+                }
+            }
+        }
+        
+        // Check for repeated phrases (like "around this around this...")
+        const phrases = [];
+        for (let i = 0; i < words.length - 1; i++) {
+            const phrase = words[i] + ' ' + words[i + 1];
+            phrases.push(phrase);
+        }
+        
+        const phraseCounts = {};
+        for (const phrase of phrases) {
+            phraseCounts[phrase] = (phraseCounts[phrase] || 0) + 1;
+            if (phraseCounts[phrase] > 5) {
+                return true;
+            }
+        }
+        
+        // Check for very long text with low unique word ratio
+        if (text.length > 500) {
+            const uniqueWords = new Set(words);
+            const repetitionRatio = 1 - (uniqueWords.size / words.length);
+            if (repetitionRatio > 0.8) {
+                return true;
+            }
         }
         
         return false;
